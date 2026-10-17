@@ -1,5 +1,5 @@
 # ==============================================================================
-# app.R — WA Water Right Applications: Active New & Change Applications (Shiny)
+# app.R - WA Water Right Applications: Active New & Change Applications (Shiny)
 # ==============================================================================
 # Maps every ACTIVE New Application and Change Application in Ecology's Water
 # Rights Tracking System (WRTS), geocoded to its PLSS section / quarter /
@@ -7,7 +7,7 @@
 # before the slider date, and the map can be exported to KMZ for Google Earth.
 #
 # DATA is prepared BEFORE publication by pipeline/run_pipeline.R (weekly, on
-# GitHub Actions) — users never upload anything. The app reads only:
+# GitHub Actions) - users never upload anything. The app reads only:
 #   data/applications.rds   records, unmapped records, "data current as of" info
 #   data/boundaries.rds     WRIA + county polygons
 # PLSS townships/sections are drawn live from BLM's CadNSDI WMS service.
@@ -48,7 +48,7 @@ TYPE_NEW <- "New Application"
 TYPE_CHG <- "Change Application"
 TYPE_ORDER <- c(TYPE_NEW, TYPE_CHG)
 
-# Map colours — the SAME colours as the PLSS Geocoder KMZ styles:
+# Map colours - the SAME colours as the PLSS Geocoder KMZ styles:
 #   New Application    KML ff0000ff -> #FF0000 (red)
 #   Change Application KML ffe6d8ad -> #ADD8E6 (light blue)
 # Light blue is pale on the Light basemap, so map markers get a dark outline.
@@ -66,7 +66,7 @@ MIN_ZOOM   <- 6
 WA_VIEW    <- c(lng1 = -124.8, lat1 = 45.5, lng2 = -116.9, lat2 = 49.0)
 WA_MAXBNDS <- c(lng1 = -127.5, lat1 = 44.3, lng2 = -114.5, lat2 = 50.3)
 
-# CARTO basemap key — read from .Renviron locally, and from the Variables
+# CARTO basemap key - read from .Renviron locally, and from the Variables
 # section of this app's settings on Posit Connect Cloud. Never typed here.
 CARTO_KEY <- Sys.getenv("CARTO_API_KEY")
 message("CARTO_API_KEY ", if (nzchar(CARTO_KEY))
@@ -106,7 +106,9 @@ wria_tbl       <- RECORDS |> distinct(wria_num, wria_label) |> filter(!is.na(wri
   arrange(wria_num)
 WRIA_CHOICES   <- setNames(as.character(wria_tbl$wria_num), wria_tbl$wria_label)
 COUNTY_CHOICES <- sort(unique(na.omit(RECORDS$county)))
-SOURCE_CHOICES <- c("Surface Water", "Groundwater")
+# "Not Recorded" = no First Source Name Listed in WRTS (source_type is NA)
+SOURCE_NA      <- "Not Recorded"
+SOURCE_CHOICES <- c("Surface Water", "Groundwater", SOURCE_NA)
 
 # Slider: Jan 1 of the earliest year -> data date (cumulative, starts at the end)
 SLIDER_MIN <- as.Date(format(min(RECORDS$slider_date), "%Y-01-01"))
@@ -136,9 +138,11 @@ popup_fields <- function(df) {
                                 paste(htmlEscape(df$qi), coalesce(df$uom, ""))),
     "Annual Vol."     = paste0(esc(df$qa), " ac-ft"),
     "Water Source"    = esc(df$source_name),
-    "Source Type"     = esc(df$source_type),
+    "Source Type"     = esc(coalesce(df$source_type, SOURCE_NA)),
     "WRIA"            = esc(df$wria_label),
     "County"          = esc(df$county),
+    "QQ Q / TRS"      = esc(trimws(gsub("\\s+", " ",
+                                        paste(coalesce(df$qq, ""), coalesce(df$q, ""), coalesce(df$trs, ""))))),
     "Phase / Stage"   = paste0(esc(df$phase), " / ", esc(df$stage))
   )
 }
@@ -162,7 +166,7 @@ build_popups <- function(df) {
 # (fixed popup field list, filtered-data export with progress message).
 #
 # Time: each placemark gets <TimeSpan><begin> = its slider date and no end, so
-# in Google Earth it appears at that date and stays visible afterwards —
+# in Google Earth it appears at that date and stays visible afterwards -
 # the same CUMULATIVE behaviour as this app's slider. (A <TimeStamp> would
 # instead show it only near that one date.)
 # ==============================================================================
@@ -218,7 +222,7 @@ kml_folder <- function(name, inner, indent) {
 build_kmz <- function(df, hierarchy = "wria_type", unmapped = NULL, title = "") {
   df <- df |> arrange(wria_num, app_type, doc_number)
   wria_name_of <- function(w) coalesce(df$wria_label[match(w, df$wria_num)], "WRIA unknown")
-
+  
   folders <- if (hierarchy == "wria_type") {
     map_chr(unique(df$wria_num), function(w) {
       grp   <- df[df$wria_num %in% w, ]
@@ -234,7 +238,7 @@ build_kmz <- function(df, hierarchy = "wria_type", unmapped = NULL, title = "") 
       kml_folder(t, inner, "  ")
     }))
   }
-
+  
   kml_doc <- paste0(
     '<?xml version="1.0" encoding="UTF-8"?>\n',
     '<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">\n',
@@ -254,7 +258,7 @@ build_kmz <- function(df, hierarchy = "wria_type", unmapped = NULL, title = "") 
     paste(folders, collapse = "\n"), "\n",
     '</Document>\n</kml>'
   )
-
+  
   dir <- tempfile("kmz_"); dir.create(dir)
   kml_path <- file.path(dir, "doc.kml")
   writeLines(kml_doc, kml_path, useBytes = TRUE)
@@ -283,7 +287,7 @@ records_export <- function(df) {
       `Priority Date`          = format(priority_date, "%m/%d/%Y"),
       Qi = qi, UOM = uom, Qa = qa,
       `Water Source`           = source_name,
-      `Source Type`            = source_type,
+      `Source Type`            = coalesce(source_type, SOURCE_NA),
       WRIA = wria_label, County = county,
       Phase = phase, Stage = stage,
       TRS = trs, Q = q, QQ = qq,
@@ -321,7 +325,7 @@ legend_html <- paste0(
 )
 
 # ==============================================================================
-# CSS — navy-to-blue banner, matching the other apps in the suite
+# CSS - navy-to-blue banner, matching the other apps in the suite
 # ==============================================================================
 
 app_css <- "
@@ -353,19 +357,19 @@ ui <- function(request) {
   navbarPage(
     title = "WR Applications",
     header = tags$head(tags$style(HTML(app_css))),
-
+    
     # ---- Tab 1: Map ---------------------------------------------------------
     tabPanel(
       "Map",
       div(class = "app-banner",
-          h2("WA Water Right Applications — Active New & Change Applications"),
+          h2("WA Water Right Applications \u2014 Active New & Change Applications"),
           p("Pending applications in Ecology's Water Rights Tracking System",
             HTML("&nbsp;&middot;&nbsp;"), "Data current as of ", strong(DATA_DATE_TXT))),
-
+      
       sidebarLayout(
         sidebarPanel(
           width = 3,
-
+          
           h4("Time slider"),
           helpText(style = "margin-top:-4px;",
                    paste0("Shows applications with a ", SLIDER_LABEL,
@@ -379,19 +383,19 @@ ui <- function(request) {
                           choices = c("1 month" = "1 month", "1 year" = "1 year",
                                       "5 years" = "5 years"),
                           selected = "1 year")),
-
+          
           hr(),
           h4("Filters"),
           checkboxGroupInput("type_show", "Application type",
                              choices = TYPE_ORDER, selected = TYPE_ORDER),
           checkboxGroupInput("source_show", "Source type",
-                             choices = SOURCE_CHOICES, selected = SOURCE_CHOICES, inline = TRUE),
+                             choices = SOURCE_CHOICES, selected = SOURCE_CHOICES),
           selectizeInput("wria_sel", "WRIA", choices = WRIA_CHOICES, multiple = TRUE,
                          options = list(placeholder = "All WRIAs (map zooms to selection)")),
           selectizeInput("county_sel", "County", choices = COUNTY_CHOICES, multiple = TRUE,
                          options = list(placeholder = "All counties")),
           checkboxInput("spread", "Spread stacked points (same location)", value = TRUE),
-
+          
           hr(),
           h4("Map overlays"),
           checkboxInput("show_wria",   "WRIA boundaries",       value = TRUE),
@@ -399,42 +403,42 @@ ui <- function(request) {
           checkboxInput("show_plss",   "PLSS / TRS grid (BLM)", value = FALSE),
           helpText(style = "font-size:11px;margin-top:-6px;",
                    "Zoom to level 10+ for section lines to render."),
-
+          
           hr(),
           h4("Download"),
           radioButtons("kmz_hierarchy", "KMZ folder grouping",
-                       choices = c("WRIA → Application type" = "wria_type",
-                                   "Application type → WRIA" = "type_wria"),
+                       choices = c("WRIA \u2192 Application type" = "wria_type",
+                                   "Application type \u2192 WRIA" = "type_wria"),
                        selected = "wria_type"),
-          downloadButton("dl_kmz_shown", "KMZ — as shown on map",
+          downloadButton("dl_kmz_shown", "KMZ \u2014 as shown on map",
                          icon = icon("earth-americas"), class = "btn-sm btn-primary dl-btn"),
-          downloadButton("dl_kmz_all", "KMZ — all active applications",
+          downloadButton("dl_kmz_all", "KMZ \u2014 all active applications",
                          icon = icon("earth-americas"), class = "btn-sm dl-btn"),
-          downloadButton("dl_csv_shown", "CSV — as shown on map",
+          downloadButton("dl_csv_shown", "CSV \u2014 as shown on map",
                          icon = icon("file-csv"), class = "btn-sm dl-btn"),
           helpText(style = "font-size:11px;",
-                   "“As shown” uses the current slider date and filters.",
-                   "“All” ignores them and also bundles the not-mapped",
+                   "\u201CAs shown\u201D uses the current slider date and filters.",
+                   "\u201CAll\u201D ignores them and also bundles the not-mapped",
                    "records as a CSV inside the KMZ. Open KMZ files in",
                    "Google Earth Pro for the time slider and popups."),
-
+          
           hr(),
           h4("Data"),
           uiOutput("data_info")
         ),
-
+        
         mainPanel(
           width = 9,
           uiOutput("stat_tiles"),
           leafletOutput("map", height = 560),
           br(),
-          h4(paste0("Cumulative applications by ", SLIDER_LABEL, " (current filters)"),
+          h4(paste0("Applications per year of ", SLIDER_LABEL, " (current filters, incl. not mapped)"),
              style = "margin-top:4px;"),
           plotlyOutput("timeline", height = 260)
         )
       )
     ),
-
+    
     # ---- Tab 2: Table -------------------------------------------------------
     tabPanel(
       "Table",
@@ -442,7 +446,7 @@ ui <- function(request) {
       p("Records currently shown on the map (slider date and filters applied)."),
       DTOutput("table")
     ),
-
+    
     # ---- Tab 3: Not mapped --------------------------------------------------
     tabPanel(
       "Not Mapped",
@@ -454,7 +458,7 @@ ui <- function(request) {
       br(), br(),
       DTOutput("unmapped_table")
     ),
-
+    
     # ---- Tab 4: About -------------------------------------------------------
     tabPanel(
       "About",
@@ -462,12 +466,12 @@ ui <- function(request) {
         width = 8, offset = 1,
         br(),
         h3("About this app"),
-
+        
         h4("What this app shows"),
         p("Each point is a water right application with Status = Active and Phase = ",
           strong("New Application"), " (red) or ", strong("Change Application"),
           " (light blue) in the Department of Ecology's Water Rights Tracking System (WRTS)."),
-
+        
         h4("Time slider"),
         p("The slider is cumulative: it shows every application whose ", SLIDER_LABEL,
           " falls on or before the slider date. Press ", strong("Play"),
@@ -475,30 +479,40 @@ ui <- function(request) {
           "Only applications that are still active today are included, so this is not",
           "a history of everything ever filed: applications already decided or withdrawn",
           "do not appear at any slider date."),
-        p(em("Note on dates:"), "for a new application the priority date is normally the date",
-          "the application was received. A change application may carry the priority date of",
-          "the existing water right being changed, so change applications can appear much",
-          "earlier on the slider than when they were filed."),
-
+        p("Some applications have been pending for decades; the oldest active application",
+          "in the state dates to 1936."),
+        
+        h4("Summary tiles and bar chart"),
+        p("The tiles and the bar chart count ", strong("all"), " active applications that match",
+          "the filters, including those that could not be mapped. The tiles count applications",
+          "dated on or before the slider date (not-mapped records with no date are always counted).",
+          "Each bar is one year, New stacked on Change; years after the slider date are faded."),
+        
+        h4("Source type"),
+        p(strong("Groundwater"), " = WRTS lists \u201CGroundwater\u201D as the first source;",
+          strong("Surface Water"), " = a named surface source;",
+          strong("Not Recorded"), " = no source name is recorded in WRTS."),
+        
         h4("Locations"),
         p("Points are placed at the PLSS section, quarter, or quarter-quarter centroid from",
           "each record's TRS description, so locations are approximate. Records sharing a",
           "location are arranged in a small circle so each can be selected; uncheck ",
           em("Spread stacked points"), " to show true centroids. Records that could not be",
           "mapped are listed on the ", strong("Not Mapped"), " tab."),
-
+        
         h4("KMZ downloads"),
         p("KMZ files open in Google Earth Pro (desktop). Placemarks are grouped in folders by",
           "WRIA and application type, each popup links to the Ecology record, and Google",
           "Earth's time slider works the same cumulative way as this app's slider."),
-
+        
         h4("Map overlays"),
-        p("WRIA boundaries: WA Department of Ecology. County boundaries: US Census Bureau",
+        p("Basemaps include the USGS National Map Hydro layer (streams and water bodies).",
+          "WRIA boundaries: WA Department of Ecology. County boundaries: US Census Bureau",
           "TIGERweb. PLSS grid: drawn live from the",
           tags$a("BLM National PLSS CadNSDI service",
                  href = "https://gis.blm.gov/arcgis/rest/services/Cadastral/BLM_Natl_PLSS_CadNSDI/MapServer",
                  target = "_blank", .noWS = "after"), "."),
-
+        
         h4("Data source and currency"),
         p("Data is sourced from the WRTS ",
           tags$a("Water Right Record Search",
@@ -508,7 +522,14 @@ ui <- function(request) {
           "against the BLM CadNSDI PLSS layer. ",
           strong(paste0("Data is current as of ", DATA_DATE_TXT, ".")),
           " Data is refreshed weekly."),
-
+        
+        h4("Companion app"),
+        p(tags$a("Water Right Application Waiting Times",
+                 href = "https://waterwater-wr-app-data.share.connect.posit.cloud/",
+                 target = "_blank"),
+          " \u2014 how long water right applications have been waiting for a decision,",
+          "a natural companion to this map of the applications themselves."),
+        
         h4("Questions and comments"),
         p(tags$a("jeffjmarti@gmail.com", href = "mailto:jeffjmarti@gmail.com")),
         br()
@@ -522,11 +543,11 @@ ui <- function(request) {
 # ==============================================================================
 
 server <- function(input, output, session) {
-
+  
   # --------------------------------------------------------------------------
   # Data panel in the sidebar
   # --------------------------------------------------------------------------
-
+  
   output$data_info <- renderUI({
     i <- DATA_INFO
     div(class = "data-note",
@@ -536,17 +557,17 @@ server <- function(input, output, session) {
           tagList(format(i$n_unmapped, big.mark = ","), " not mapped (see Not Mapped tab)", br()),
         "Source: WA Ecology WRTS")
   })
-
+  
   # --------------------------------------------------------------------------
   # Play / All buttons
   # --------------------------------------------------------------------------
-
+  
   playing <- reactiveVal(FALSE)
   stop_play <- function() {
     playing(FALSE)
     updateActionButton(session, "play", label = "Play", icon = icon("play"))
   }
-
+  
   observeEvent(input$play, {
     # Pressing Play at the end starts again from the beginning
     if (!playing() && as.Date(input$thru) >= SLIDER_MAX) {
@@ -557,12 +578,12 @@ server <- function(input, output, session) {
                        label = if (playing()) "Pause" else "Play",
                        icon  = icon(if (playing()) "pause" else "play"))
   })
-
+  
   observeEvent(input$go_end, {
     stop_play()
     updateSliderInput(session, "thru", value = SLIDER_MAX)
   })
-
+  
   observe({
     req(playing())
     invalidateLater(900)
@@ -577,40 +598,59 @@ server <- function(input, output, session) {
       }
     })
   })
-
+  
   # --------------------------------------------------------------------------
   # Filtering
   #   base_filtered(): attribute filters only (independent of the date)
   #   shown():         + slider date (cumulative)
   # --------------------------------------------------------------------------
-
+  
   thru <- reactive({
     req(input$thru)
     as.Date(input$thru)
   })
-
-  base_filtered <- reactive({
-    df <- RECORDS |> filter(app_type %in% input$type_show,
-                            source_type %in% input$source_show | is.na(source_type))
+  
+  # Same attribute filters for mapped (RECORDS) and not-mapped (UNMAPPED) records
+  apply_filters <- function(df) {
+    df <- df |> filter(app_type %in% input$type_show,
+                       coalesce(source_type, SOURCE_NA) %in% input$source_show)
     if (length(input$wria_sel)   > 0) df <- df |> filter(as.character(wria_num) %in% input$wria_sel)
     if (length(input$county_sel) > 0) df <- df |> filter(county %in% input$county_sel)
     df
-  })
-
+  }
+  
+  base_filtered <- reactive(apply_filters(RECORDS))
+  
+  # Mapped records on the map: attribute filters + slider date
   shown <- reactive({
     base_filtered() |> filter(slider_date <= thru())
   })
-
+  
+  # Not-mapped records under the same filters. Records with no date can't be
+  # placed in time, so they are always counted.
+  unmapped_filtered <- reactive(apply_filters(UNMAPPED))
+  unmapped_thru <- reactive({
+    unmapped_filtered() |> filter(is.na(slider_date) | slider_date <= thru())
+  })
+  
+  # Mapped + not mapped together - used by the tiles and the bar chart
+  all_filtered <- reactive({
+    bind_rows(base_filtered(), unmapped_filtered()) |> filter(!is.na(slider_date))
+  })
+  
   # --------------------------------------------------------------------------
   # Stat tiles
   # --------------------------------------------------------------------------
-
+  
+  # Tiles count mapped AND not-mapped applications (same filters + slider date)
   output$stat_tiles <- renderUI({
-    df <- shown()
+    um     <- unmapped_thru()
+    df     <- bind_rows(shown(), um)
     n_new  <- sum(df$app_type == TYPE_NEW)
     n_chg  <- sum(df$app_type == TYPE_CHG)
-    n_last <- sum(df$slider_date > seq(thru(), by = "-1 year", length.out = 2)[2])
-
+    yr_ago <- seq(thru(), by = "-1 year", length.out = 2)[2]
+    n_last <- sum(df$slider_date > yr_ago & df$slider_date <= thru(), na.rm = TRUE)
+    
     tile <- function(num, lbl, swatch = NULL) {
       div(class = "stat-tile",
           div(class = "num", format(num, big.mark = ",")),
@@ -618,26 +658,27 @@ server <- function(input, output, session) {
     }
     sw <- function(col) paste0("<span style='color:", col,
                                ";text-shadow:0 0 1px #1f2a44;'>&#9679;</span> ")
-
+    
     div(class = "stat-row",
         tile(nrow(df), paste("Applications through", format(thru(), "%m/%d/%Y"))),
         tile(n_new, "New applications", sw(COL_NEW)),
         tile(n_chg, "Change applications", sw(COL_CHG)),
+        tile(nrow(um), "Not mapped (counted, not on map)"),
         tile(n_last, paste0("With a ", SLIDER_LABEL, " in the 12 months before the slider date")))
   })
-
+  
   # --------------------------------------------------------------------------
-  # Map — base, boundaries and PLSS drawn once; points redrawn via proxy.
+  # Map - base, boundaries and PLSS drawn once; points redrawn via proxy.
   #   basemap (200) < PLSS grid (350) < boundaries (410) < points (420)
   # --------------------------------------------------------------------------
-
+  
   output$map <- renderLeaflet({
     m <- leaflet(options = leafletOptions(preferCanvas = TRUE, minZoom = MIN_ZOOM,
                                           maxBoundsViscosity = 1.0)) |>
       addMapPane("plss",       zIndex = 350) |>
       addMapPane("boundaries", zIndex = 410) |>
       addMapPane("points",     zIndex = 420)
-
+    
     m <- if (nzchar(CARTO_KEY)) {
       m |> addTiles(
         urlTemplate = paste0("https://basemaps.cartocdn.com/rastertiles/light_all/",
@@ -646,8 +687,13 @@ server <- function(input, output, session) {
     } else {
       m |> addProviderTiles(providers$CartoDB.Positron, group = "Light")
     }
-
+    
     m <- m |>
+      addTiles(
+        urlTemplate = paste0("https://basemap.nationalmap.gov/arcgis/rest/services/",
+                             "USGSHydroCached/MapServer/tile/{z}/{y}/{x}"),
+        attribution = "USGS The National Map | Hydro Cached",
+        options = tileOptions(maxNativeZoom = 16), group = "USGS Hydro") |>
       addProviderTiles(providers$Esri.WorldTopoMap, group = "Topographic") |>
       addProviderTiles(providers$Esri.WorldImagery, group = "Imagery") |>
       addWMSTiles(
@@ -658,7 +704,7 @@ server <- function(input, output, session) {
         attribution = "PLSS grid: BLM National CadNSDI",
         group = "PLSS grid"
       )
-
+    
     if (!is.null(WRIA_SF)) {
       m <- m |> addPolygons(
         data = WRIA_SF, group = "WRIA boundaries",
@@ -682,9 +728,9 @@ server <- function(input, output, session) {
         options = pathOptions(pane = "boundaries")
       )
     }
-
+    
     m |>
-      addLayersControl(baseGroups = c("Light", "Topographic", "Imagery"),
+      addLayersControl(baseGroups = c("Light", "USGS Hydro", "Topographic", "Imagery"),
                        position = "topleft",
                        options = layersControlOptions(collapsed = TRUE)) |>
       fitBounds(WA_VIEW[["lng1"]], WA_VIEW[["lat1"]], WA_VIEW[["lng2"]], WA_VIEW[["lat2"]]) |>
@@ -694,11 +740,11 @@ server <- function(input, output, session) {
       addControl(HTML(legend_html), position = "bottomright") |>
       addScaleBar(position = "bottomleft")
   })
-
+  
   # input$map_zoom first appears once the map has drawn -> "map is ready"
   map_ready <- reactiveVal(FALSE)
   observeEvent(input$map_zoom, map_ready(TRUE), once = TRUE)
-
+  
   observe({
     req(map_ready())
     proxy <- leafletProxy("map")
@@ -708,7 +754,7 @@ server <- function(input, output, session) {
       toggle(input$show_county, "County boundaries") |>
       toggle(input$show_plss,   "PLSS grid")
   })
-
+  
   observeEvent(input$wria_sel, {
     req(map_ready())
     proxy <- leafletProxy("map") |> clearGroup("WRIA selected")
@@ -728,87 +774,108 @@ server <- function(input, output, session) {
                            WA_VIEW[["lng2"]], WA_VIEW[["lat2"]])
     }
   }, ignoreNULL = FALSE, ignoreInit = TRUE)
-
+  
   # Points
   observe({
     req(map_ready())
     df <- shown()
     use_spread <- isTRUE(input$spread)
-
+    
     proxy <- leafletProxy("map") |> clearGroup("points")
     if (nrow(df) == 0) return()
-
+    
     df <- df |>
       arrange(desc(app_type == TYPE_CHG)) |>          # new (red) drawn on top
       mutate(x = if (use_spread) lon_sprd else lon,
              y = if (use_spread) lat_sprd else lat,
              fill_col = if_else(app_type == TYPE_NEW, COL_NEW, COL_CHG))
-
+    
     proxy |>
       addCircleMarkers(
         data = df, lng = ~x, lat = ~y, group = "points",
         radius = 6, color = COL_OUTLINE, weight = 1, opacity = 0.9,
         fillColor = ~fill_col, fillOpacity = 0.95,
         popup = build_popups(df),
-        label = ~paste0(doc_number, " — ", app_type),
+        label = ~paste0(doc_number, " \u2014 ", coalesce(holder, "(no name)")),
         options = pathOptions(pane = "points")
       )
   })
-
+  
   # --------------------------------------------------------------------------
-  # Cumulative chart — one step line per application type, plus a dotted
-  # line at the slider date (moved through plotlyProxy, no full redraw).
+  # Stacked bar chart - applications per year (mapped + not mapped, current
+  # filters), New stacked on Change. Years after the slider date are faded,
+  # and a dotted line marks the slider date. When the slider moves, only the
+  # fading and the line change (plotlyProxy, no full redraw, no flicker).
   # --------------------------------------------------------------------------
-
+  
   thru_shape <- function(d) {
     list(list(type = "line", x0 = d, x1 = d, yref = "paper", y0 = 0, y1 = 1,
               line = list(color = "#52514e", width = 1.5, dash = "dot")))
   }
-
+  
+  # 1 for years up to the slider year, faded after it
+  bar_opacity <- function(years, d) {
+    ifelse(years <= as.integer(format(d, "%Y")), 1, 0.25)
+  }
+  
+  chart_years <- reactiveVal(NULL)
+  
   output$timeline <- renderPlotly({
-    df <- base_filtered()
+    df <- all_filtered()
     req(nrow(df) > 0)
     d0 <- isolate(thru())
-
-    p <- plot_ly()
-    for (k in seq_along(TYPE_ORDER)) {
-      t  <- TYPE_ORDER[k]
-      dd <- sort(df$slider_date[df$app_type == t])
-      if (length(dd) == 0) next
-      p <- p |> add_lines(
-        x = c(dd, SLIDER_MAX), y = c(seq_along(dd), length(dd)),
-        name = t, line = list(shape = "hv", width = 2.5,
-                              color = if (t == TYPE_CHG) "#5aa9c9" else COL_NEW),
-        hovertemplate = paste0("%{x|%m/%d/%Y}: %{y:,} ", tolower(t), "s<extra></extra>"))
-    }
-    p |>
+    
+    yr  <- as.integer(format(df$slider_date, "%Y"))
+    yrs <- seq(min(yr), max(yr))
+    chart_years(yrs)
+    cnt   <- function(t) as.integer(table(factor(yr[df$app_type == t], levels = yrs)))
+    x_mid <- as.Date(paste0(yrs, "-07-01"))          # bar centred mid-year
+    bar_w <- 0.82 * 365.25 * 86400000                # bar width in ms (date axis)
+    op    <- bar_opacity(yrs, d0)
+    
+    plot_ly(x = x_mid) |>
+      add_bars(y = cnt(TYPE_CHG), name = TYPE_CHG, width = bar_w, customdata = yrs,
+               marker = list(color = COL_CHG, opacity = op,
+                             line = list(color = COL_OUTLINE, width = 0.5)),
+               hovertemplate = "%{customdata}: %{y:,} change<extra></extra>") |>
+      add_bars(y = cnt(TYPE_NEW), name = TYPE_NEW, width = bar_w, customdata = yrs,
+               marker = list(color = COL_NEW, opacity = op,
+                             line = list(color = COL_OUTLINE, width = 0.5)),
+               hovertemplate = "%{customdata}: %{y:,} new<extra></extra>") |>
       layout(
-        xaxis = list(title = "", showgrid = FALSE, color = "#52514e", type = "date"),
-        yaxis = list(title = "Applications (cumulative)", gridcolor = "#ebeae6",
+        barmode   = "stack",
+        hovermode = "x unified",
+        xaxis = list(title = paste("Year of", SLIDER_LABEL), showgrid = FALSE,
+                     color = "#52514e", type = "date"),
+        yaxis = list(title = "Applications", gridcolor = "#ebeae6",
                      zeroline = FALSE, color = "#52514e", rangemode = "tozero"),
-        legend = list(orientation = "h", x = 0, y = 1.18),
+        legend = list(orientation = "h", x = 0, y = 1.18, traceorder = "reversed"),
         shapes = thru_shape(d0),
-        margin = list(l = 55, r = 20, t = 10, b = 30),
+        margin = list(l = 55, r = 20, t = 10, b = 40),
         plot_bgcolor = "#fcfcfb", paper_bgcolor = "#ffffff"
       ) |>
       config(displayModeBar = FALSE)
   })
-
+  
   observeEvent(thru(), {
+    yrs <- chart_years()
+    req(yrs)
+    op <- as.list(bar_opacity(yrs, thru()))
     plotlyProxy("timeline", session) |>
+      plotlyProxyInvoke("restyle", list(marker.opacity = list(op, op)), list(0, 1)) |>
       plotlyProxyInvoke("relayout", list(shapes = thru_shape(thru())))
   }, ignoreInit = TRUE)
-
+  
   # --------------------------------------------------------------------------
   # Tables
   # --------------------------------------------------------------------------
-
+  
   output$table <- renderDT({
     datatable(records_export(shown()) |> select(-`Ecology Record URL`, -lon, -lat),
               rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE))
   })
-
+  
   output$unmapped_table <- renderDT({
     df <- unmapped_export(UNMAPPED) |>
       mutate(`Record Document Number` = paste0(
@@ -818,13 +885,13 @@ server <- function(input, output, session) {
     datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE))
   })
-
+  
   # --------------------------------------------------------------------------
   # Downloads
   # --------------------------------------------------------------------------
-
+  
   stamp <- function() format(DATA_INFO$data_date, "%Y%m%d")
-
+  
   output$dl_kmz_shown <- downloadHandler(
     filename = function() paste0("WR_Applications_thru_", format(thru(), "%Y%m%d"),
                                  "_data_", stamp(), ".kmz"),
@@ -838,7 +905,7 @@ server <- function(input, output, session) {
       })
     }
   )
-
+  
   output$dl_kmz_all <- downloadHandler(
     filename = function() paste0("WR_Applications_all_data_", stamp(), ".kmz"),
     content = function(file) {
@@ -849,13 +916,13 @@ server <- function(input, output, session) {
       })
     }
   )
-
+  
   output$dl_csv_shown <- downloadHandler(
     filename = function() paste0("WR_Applications_thru_", format(thru(), "%Y%m%d"),
                                  "_data_", stamp(), ".csv"),
     content = function(file) write_csv(records_export(shown()), file, na = "")
   )
-
+  
   output$dl_unmapped <- downloadHandler(
     filename = function() paste0("WR_Applications_not_mapped_", stamp(), ".csv"),
     content = function(file) write_csv(unmapped_export(UNMAPPED), file, na = "")
