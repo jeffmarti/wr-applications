@@ -229,7 +229,7 @@ unmapped <- bind_rows(fail, no_date) |>
   arrange(wria_num, doc_number)
 
 outside <- sum(records$lon < -125 | records$lon > -116.5 |
-               records$lat < 45.4 | records$lat > 49.1)
+                 records$lat < 45.4 | records$lat > 49.1)
 
 # ==============================================================================
 # STEP 3 — Data-currency info + save
@@ -267,7 +267,7 @@ bnd_incomplete <- file.exists(bnd_file) &&
 if (REFRESH_BOUNDARIES || !file.exists(bnd_file) || bnd_incomplete) {
   wria_sf   <- fetch_boundary(WRIA_GEOJSON_URL,   "WRIA boundaries")
   county_sf <- fetch_boundary(COUNTY_GEOJSON_URL, "WA county boundaries")
-
+  
   if (!is.null(wria_sf)) {
     nr_col <- names(wria_sf)[str_detect(names(wria_sf),
                                         regex("NR$|NUM$|NUMBER$", ignore_case = TRUE))][1]
@@ -281,7 +281,7 @@ if (REFRESH_BOUNDARIES || !file.exists(bnd_file) || bnd_incomplete) {
       select(WRIA, wria_display)
   }
   if (!is.null(county_sf)) county_sf <- county_sf |> select(NAME)
-
+  
   # Never replace a good layer with a failed download
   old <- if (file.exists(bnd_file)) readRDS(bnd_file) else list(wria = NULL, county = NULL)
   saveRDS(list(wria   = if (is.null(wria_sf))   old$wria   else wria_sf,
@@ -315,9 +315,10 @@ if (nrow(records) > 0) {
           summarise(earliest = min(slider_date), median = median(slider_date),
                     latest = max(slider_date), .groups = "drop"))
   n_old_chg <- sum(records$app_type == "Change Application" &
-                   records$slider_date < as.Date("1990-01-01"))
-  if (n_old_chg > 0) cat("  NOTE:", n_old_chg, "change applications dated before 1990 -",
-                         "likely the ORIGINAL right's priority date, not the filing date\n")
+                     records$slider_date < as.Date("1990-01-01"))
+  # Checked 10/16/2026: spot-checked pre-1990 change applications are genuine
+  # old filings. Kept as an informational count only.
+  if (n_old_chg > 0) cat("  (info)", n_old_chg, "change applications dated before 1990\n")
 }
 cat("Points outside WA bounds    :", outside, if (outside > 0) "  <-- CHECK" else "", "\n")
 cat("WRIA polygons               :", if (is.null(bnd$wria)) "MISSING" else nrow(bnd$wria),
