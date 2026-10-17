@@ -10,12 +10,14 @@
 # GitHub Actions) - users never upload anything. The app reads only:
 #   data/applications.rds   records, unmapped records, "data current as of" info
 #   data/boundaries.rds     WRIA + county polygons
+#   data/purpose_codes.csv  OPTIONAL extra purpose codes (the full key is built in)
 # PLSS townships/sections are drawn live from BLM's CadNSDI WMS service.
 #
 # FOLDER LAYOUT (RStudio project folder = the GitHub repo jeffmarti/wr-applications):
 #   app.R                          <- this file             (deploy)
 #   data/applications.rds                                    (deploy)
 #   data/boundaries.rds                                      (deploy)
+#   data/purpose_codes.csv         <- optional extra purpose codes      (deploy if present)
 #   manifest.json                  <- for Posit Connect Cloud (deploy)
 #   pipeline/                      <- refresh scripts + cache (do NOT deploy)
 #   .github/workflows/refresh-data.yml
@@ -43,6 +45,7 @@ library(zip)
 
 APP_DATA_FILE <- "data/applications.rds"
 BOUNDARY_FILE <- "data/boundaries.rds"
+PURPOSE_FILE  <- "data/purpose_codes.csv"
 
 TYPE_NEW <- "New Application"
 TYPE_CHG <- "Change Application"
@@ -109,6 +112,91 @@ COUNTY_CHOICES <- sort(unique(na.omit(RECORDS$county)))
 # "Not Recorded" = no First Source Name Listed in WRTS (source_type is NA)
 SOURCE_NA      <- "Not Recorded"
 SOURCE_CHOICES <- c("Surface Water", "Groundwater", SOURCE_NA)
+
+# Purpose-of-use code definitions - same file and handling as the low-flow-wr app.
+# Two columns ("Purpose of Use Codes", "Purpose"), read by position because the
+# header has a BOM; codes trimmed and matched case-insensitively ("IFlow" = "Iflow").
+# Built-in key (same list as the low-flow-wr app, with "Muncipal" spelled
+# correctly, plus CN, HW, NR, OA - confirmed by Jeff from WRTS records 10/17/2026). data/purpose_codes.csv is optional: if present, any codes it has
+# that are NOT in this list are added; the built-in definitions win otherwise.
+PURPOSE_BUILTIN <- tibble::tribble(
+  ~code,   ~definition,
+  "CI",    "Commercial/Industrial",
+  "CN",    "Conveyance",
+  "CO",    "Cooling",
+  "DC",    "Dust Control",
+  "DG",    "Domestic General",
+  "DM",    "Domestic Multiple",
+  "DS",    "Domestic Single",
+  "DY",    "Dairy",
+  "EN",    "Environmental Quality",
+  "FP",    "Fire Protection",
+  "FR",    "Frost Protection",
+  "FS",    "Fish Propagation",
+  "GP",    "Groundwater Preservation",
+  "HE",    "Heat Exchange",
+  "HP",    "Heat Protection for Crops",
+  "HW",    "Highway",
+  "IFlow", "Instream Flow",
+  "IR",    "Irrigation",
+  "MI",    "Mining",
+  "MT",    "Mitigation",
+  "MU",    "Municipal",
+  "NR",    "No Purpose Identified",
+  "OA",    "Other Agricultural Uses",
+  "OT",    "Other",
+  "PO",    "Power",
+  "RE",    "Recreation/Beautification",
+  "RW",    "Railway",
+  "SA",    "Stream Augmentation",
+  "SR",    "Storage",
+  "ST",    "Stockwatering",
+  "WL",    "Wildlife"
+)
+
+# Two columns ("Purpose of Use Codes", "Purpose"), read by position because the
+# header has a BOM; codes trimmed and matched case-insensitively ("IFlow" = "Iflow").
+purpose_file <- tryCatch(
+  read_csv(PURPOSE_FILE, col_types = cols(.default = "c"), show_col_types = FALSE) |>
+    rename(code = 1, definition = 2) |>
+    mutate(code = trimws(code), definition = trimws(definition)) |>
+    filter(!is.na(code), code != "", !is.na(definition), definition != ""),
+  error = function(e) NULL)
+message("Purpose codes: ", if (is.null(purpose_file)) "built-in list (no " else "built-in list + ",
+        PURPOSE_FILE, if (is.null(purpose_file)) ")" else "")
+
+PURPOSE_DEFS <- bind_rows(PURPOSE_BUILTIN, purpose_file) |>
+  mutate(code_upper = toupper(code)) |>
+  distinct(code_upper, .keep_all = TRUE)        # built-in wins where both have a code
+
+# A record's purpose can list several codes ("IR, DS"); split into single codes
+split_purposes <- function(x) {
+  x <- unlist(strsplit(x[!is.na(x)], ","))
+  x <- trimws(x)
+  x[x != ""]
+}
+purpose_def <- function(code) {
+  d <- PURPOSE_DEFS$definition[match(toupper(code), PURPOSE_DEFS$code_upper)]
+  ifelse(is.na(d), "(see Ecology WRTS help)", d)
+}
+
+# Codes present in the data (mapped + not mapped), upper-cased so "IFlow"/"Iflow" merge
+PURPOSE_CODES   <- sort(unique(toupper(split_purposes(c(RECORDS$purpose, UNMAPPED$purpose)))))
+missing_defs <- setdiff(PURPOSE_CODES, PURPOSE_DEFS$code_upper)
+if (length(missing_defs) > 0) message("Purpose codes with no definition: ",
+                                      paste(missing_defs, collapse = ", "))
+# Show each code as the purpose file spells it ("Iflow"); match on upper case
+purpose_label <- function(code) {
+  coalesce(PURPOSE_DEFS$code[match(toupper(code), PURPOSE_DEFS$code_upper)], code)
+}
+PURPOSE_CHOICES <- setNames(PURPOSE_CODES,
+                            paste0(purpose_label(PURPOSE_CODES), " \u2014 ", purpose_def(PURPOSE_CODES)))
+
+# TRUE for records whose purpose list includes ANY of the selected codes
+has_purpose <- function(purpose, codes) {
+  pattern <- paste0("(^|,)\\s*(", paste(codes, collapse = "|"), ")\\s*(,|$)")
+  grepl(pattern, coalesce(purpose, ""), ignore.case = TRUE)
+}
 
 # Slider: Jan 1 of the earliest year -> data date (cumulative, starts at the end)
 SLIDER_MIN <- as.Date(format(min(RECORDS$slider_date), "%Y-01-01"))
@@ -347,6 +435,9 @@ app_css <- "
   .navbar { margin-bottom: 0; }
   .data-note { font-size: 12px; color: #52514e; margin-bottom: 4px; }
   .dl-btn { width: 100%; margin-bottom: 6px; text-align: left; }
+  .stat-tile .sub { font-size: 12px; color: #0b0b0b; margin-top: 2px; }
+  .purpose-row  { font-size: 11px; line-height: 1.75; color: #444; }
+  .purpose-code { font-weight: 700; color: #1a3a5c; display: inline-block; min-width: 48px; }
 "
 
 # ==============================================================================
@@ -394,6 +485,10 @@ ui <- function(request) {
                          options = list(placeholder = "All WRIAs (map zooms to selection)")),
           selectizeInput("county_sel", "County", choices = COUNTY_CHOICES, multiple = TRUE,
                          options = list(placeholder = "All counties")),
+          selectizeInput("purpose_sel", "Purpose of use", choices = PURPOSE_CHOICES,
+                         multiple = TRUE,
+                         options = list(placeholder = "All purposes",
+                                        plugins = list("remove_button"))),
           checkboxInput("spread", "Spread stacked points (same location)", value = TRUE),
           
           hr(),
@@ -424,7 +519,12 @@ ui <- function(request) {
           
           hr(),
           h4("Data"),
-          uiOutput("data_info")
+          uiOutput("data_info"),
+          
+          hr(),
+          h4("Purpose of use codes"),
+          lapply(PURPOSE_CODES, function(code)
+            div(class = "purpose-row", span(class = "purpose-code", purpose_label(code)), purpose_def(code)))
         ),
         
         mainPanel(
@@ -487,6 +587,15 @@ ui <- function(request) {
           "the filters, including those that could not be mapped. The tiles count applications",
           "dated on or before the slider date (not-mapped records with no date are always counted).",
           "Each bar is one year, New stacked on Change; years after the slider date are faded."),
+        
+        p("The New and Change tiles also show the ", strong(paste("median", SLIDER_LABEL)),
+          " of the applications counted: half are older, half are newer. It follows the",
+          "slider and every filter."),
+        
+        h4("Purpose of use"),
+        p("The Purpose of use menu keeps applications that list ", strong("any"),
+          " of the selected codes (an application can list several, e.g. \u201CIR, DS\u201D).",
+          "The code key is at the bottom of the sidebar."),
         
         h4("Source type"),
         p(strong("Groundwater"), " = WRTS lists \u201CGroundwater\u201D as the first source;",
@@ -616,6 +725,7 @@ server <- function(input, output, session) {
                        coalesce(source_type, SOURCE_NA) %in% input$source_show)
     if (length(input$wria_sel)   > 0) df <- df |> filter(as.character(wria_num) %in% input$wria_sel)
     if (length(input$county_sel) > 0) df <- df |> filter(county %in% input$county_sel)
+    if (length(input$purpose_sel) > 0) df <- df |> filter(has_purpose(purpose, input$purpose_sel))
     df
   }
   
@@ -651,18 +761,27 @@ server <- function(input, output, session) {
     yr_ago <- seq(thru(), by = "-1 year", length.out = 2)[2]
     n_last <- sum(df$slider_date > yr_ago & df$slider_date <= thru(), na.rm = TRUE)
     
-    tile <- function(num, lbl, swatch = NULL) {
+    # Median priority date of one application type (NA dates ignored)
+    med_date <- function(t) {
+      d <- df$slider_date[df$app_type == t & !is.na(df$slider_date)]
+      if (length(d) == 0) "\u2014" else format(median(d), "%m-%d-%Y")
+    }
+    
+    tile <- function(num, lbl, swatch = NULL, sub = NULL) {
       div(class = "stat-tile",
           div(class = "num", format(num, big.mark = ",")),
-          div(class = "lbl", if (!is.null(swatch)) HTML(swatch), lbl))
+          div(class = "lbl", if (!is.null(swatch)) HTML(swatch), lbl),
+          if (!is.null(sub)) div(class = "sub", sub))
     }
     sw <- function(col) paste0("<span style='color:", col,
                                ";text-shadow:0 0 1px #1f2a44;'>&#9679;</span> ")
     
     div(class = "stat-row",
         tile(nrow(df), paste("Applications through", format(thru(), "%m/%d/%Y"))),
-        tile(n_new, "New applications", sw(COL_NEW)),
-        tile(n_chg, "Change applications", sw(COL_CHG)),
+        tile(n_new, "New applications", sw(COL_NEW),
+             sub = paste("Median", SLIDER_LABEL, med_date(TYPE_NEW))),
+        tile(n_chg, "Change applications", sw(COL_CHG),
+             sub = paste("Median", SLIDER_LABEL, med_date(TYPE_CHG))),
         tile(nrow(um), "Not mapped (counted, not on map)"),
         tile(n_last, paste0("With a ", SLIDER_LABEL, " in the 12 months before the slider date")))
   })
