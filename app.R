@@ -551,9 +551,14 @@ ui <- function(request) {
     tabPanel(
       "Not Mapped",
       br(),
-      p("Active applications that could not be placed on the map. Common causes:",
+      p("'Not Mapped' means the record could not be successfully geocoded as a centroid location and placed on the map. Common causes:",
         "no TRS recorded in WRTS, a TRS that has no matching BLM PLSS section",
-        "(e.g. Donation Land Claims, typos), or no ", SLIDER_LABEL, " to place it in time."),
+        "(e.g. Donation Land Claims, Protracted Blocks, typos), or no ", SLIDER_LABEL, " to display it using the date slider.",
+        "Check the",
+        tags$a("Department of Ecology Water Rights Map webpage",
+               href = "https://appswr.ecology.wa.gov/WaterRightsMap", target = "_blank"),
+        "to determine if the proposed application place of use",
+        "has been mapped. If not mapped there, the scanned application file should contain a map. Ecology has mapped about 76 percent of all applications as of October 2026. Using centroids, approximate locations can be provided for about 98 percent of all applications."),
       downloadButton("dl_unmapped", "Download not-mapped records (CSV)", class = "btn-sm"),
       br(), br(),
       DTOutput("unmapped_table")
@@ -989,9 +994,14 @@ server <- function(input, output, session) {
   # Tables
   # --------------------------------------------------------------------------
   
+  # Record numbers link to Ecology's record page (same as the Not Mapped table)
   output$table <- renderDT({
-    datatable(records_export(shown()) |> select(-`Ecology Record URL`, -lon, -lat),
-              rownames = FALSE, filter = "top",
+    df <- records_export(shown()) |>
+      mutate(`Record Document Number` = paste0(
+        "<a href='", `Ecology Record URL`, "' target='_blank'>",
+        htmlEscape(`Record Document Number`), "</a>")) |>
+      select(-`Ecology Record URL`, -lon, -lat)
+    datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE))
   })
   
